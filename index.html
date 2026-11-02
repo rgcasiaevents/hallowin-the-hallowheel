@@ -124,28 +124,52 @@ function request(params,cb){
  script.src=API_URL+'?'+new URLSearchParams({...params,callback:fn,_:Date.now()});
  document.head.appendChild(script);
 }
-function wheelDraw(list){
- const display=list.length?list:['AWAITING PLAYERS'];const n=display.length,center=350,r=336;
- ctx.clearRect(0,0,700,700);ctx.save();ctx.translate(center,center);ctx.rotate(rotation);
- display.forEach((name,i)=>{
-   const a=-Math.PI/2+i*2*Math.PI/n,b=a+2*Math.PI/n;
-   ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,r,a,b);ctx.closePath();
-   const grad=ctx.createRadialGradient(0,0,30,0,0,r);
-   if(i%2){grad.addColorStop(0,'#a72d0a');grad.addColorStop(.67,'#e94d0b');grad.addColorStop(1,'#4b100d');}
-   else{grad.addColorStop(0,'#3a0e12');grad.addColorStop(.67,'#751c12');grad.addColorStop(1,'#170c12');}
-   ctx.fillStyle=grad;ctx.fill();ctx.strokeStyle='#ffae4e';ctx.lineWidth=3;ctx.stroke();
-   // Every entrant remains labelled, including when the wheel has 40+ names.
-   // Labels are radial and automatically sized to the available slice.
-   ctx.save();ctx.rotate(a+Math.PI/n);
-   ctx.fillStyle='#fff3d9';ctx.shadowColor='#000';ctx.shadowBlur=3;
-   const fontSize=n>110?7:n>75?9:n>50?11:n>30?12:n>20?14:n>12?17:21;
-   ctx.font='700 '+fontSize+'px Arial';ctx.textAlign='right';ctx.textBaseline='middle';
-   ctx.fillText(String(name),r-22,0,r-108);
-   ctx.restore();
- });
- ctx.restore();ctx.beginPath();ctx.arc(center,center,r,0,Math.PI*2);ctx.lineWidth=8;ctx.strokeStyle='#ffbf5e';ctx.stroke();
- 
+// Render the complete labelled wheel only when the entrants change.
+// During a spin, each animation frame rotates one cached bitmap rather than
+// re-drawing dozens of gradients, slices and player names.
+const wheelCache=document.createElement('canvas');
+wheelCache.width=wheelCache.height=700;
+const cacheCtx=wheelCache.getContext('2d',{alpha:true});
+let cachedNames=null;
+function cacheWheel(list){
+ const display=list.length?list:['AWAITING PLAYERS'];
+ const signature=JSON.stringify(display);
+ if(signature===cachedNames)return;
+ cachedNames=signature;
+ const c=cacheCtx,n=display.length,r=336;
+ c.clearRect(0,0,700,700);
+ c.save();c.translate(350,350);
+ // Reuse two gradients rather than allocating one per wedge.
+ const warm=c.createRadialGradient(0,0,30,0,0,r);
+ warm.addColorStop(0,'#a72d0a');warm.addColorStop(.67,'#e94d0b');warm.addColorStop(1,'#4b100d');
+ const dark=c.createRadialGradient(0,0,30,0,0,r);
+ dark.addColorStop(0,'#3a0e12');dark.addColorStop(.67,'#751c12');dark.addColorStop(1,'#170c12');
+ const sector=2*Math.PI/n;
+ const fontSize=n>110?7:n>75?9:n>50?11:n>30?12:n>20?14:n>12?17:21;
+ c.font='700 '+fontSize+'px Arial';c.textAlign='right';c.textBaseline='middle';
+ for(let i=0;i<n;i++){
+   const a=-Math.PI/2+i*sector,b=a+sector;
+   c.beginPath();c.moveTo(0,0);c.arc(0,0,r,a,b);c.closePath();
+   c.fillStyle=i%2?warm:dark;c.fill();
+   c.strokeStyle='#ffae4e';c.lineWidth=3;c.stroke();
+   c.save();c.rotate(a+sector/2);
+   c.fillStyle='#fff3d9';c.shadowColor='#000';c.shadowBlur=3;
+   c.fillText(String(display[i]),r-22,0,r-108);
+   c.restore();
+ }
+ c.restore();
 }
+function wheelDraw(list){
+ cacheWheel(list);
+ ctx.clearRect(0,0,700,700);
+ ctx.save();ctx.translate(350,350);ctx.rotate(rotation);
+ ctx.drawImage(wheelCache,-350,-350);
+ ctx.restore();
+ // The outer gold rim stays stationary while the wheel rotates.
+ ctx.beginPath();ctx.arc(350,350,336,0,Math.PI*2);
+ ctx.lineWidth=8;ctx.strokeStyle='#ffbf5e';ctx.stroke();
+}
+
 const rosterSearch=document.getElementById('rosterSearch');
 const rosterList=document.getElementById('rosterList');
 const rosterCount=document.getElementById('rosterCount');
@@ -203,7 +227,7 @@ function refresh(){
     const mode=data.liveSpin===true?'LIVE':'TRIAL';
    if(previousMode!==null&&mode!==previousMode){lastSpinId=null;firstRefresh=true;drawResult.textContent='';}
    previousMode=mode;
-   const old=names.slice();names=Array.isArray(data.names)?data.names:[];renderWinners(data);renderRoster();
+   const old=names.slice();names=Array.isArray(data.names)?data.names:[];renderWinners(data);
    if(!animating)wheelDraw(names);
    status.textContent=names.length+' eligible player'+(names.length===1?'':'s')+' on the wheel';
    if(!data.registrationOpen){button.disabled=true;button.textContent='REGISTRATION CLOSED';}
@@ -280,5 +304,5 @@ pumpkinButton.addEventListener('click',()=>{
  const timeout=setTimeout(()=>{if(!finished){cleanup();window.alert('Spin timed out. Check the Draws sheet before retrying.');}},30000);
  post.submit();
 });
-wheelDraw([]);renderRoster();refresh();setInterval(refresh,6500);
+wheelDraw([]);refresh();setInterval(refresh,6500);
 </script></body></html>
